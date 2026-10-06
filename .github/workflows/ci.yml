@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scripthashtag: '#!/bin/sh'
+          additional_files: 'ngxunprivinst.sh'
+          severity: warning
+
+  unit-tests:
+    name: Unit & Parsing Tests
+    runs-on: ubuntu-latest
+    needs: shellcheck
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make test scripts executable
+        run: chmod +x ngxunprivinst.sh tests/test_ngxunprivinst.sh
+
+      - name: Run Test Suite
+        run: ./tests/test_ngxunprivinst.sh
+
+  os-matrix-tests:
+    name: OS Matrix Testing
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        container:
+          - "ubuntu:24.04"
+          - "ubuntu:26.04"
+          - "debian:bookworm"
+          - "rockylinux:9"
+          - "alpine:latest"
+    container:
+      image: ${{ matrix.container }}
+    steps:
+      - name: Install dependencies (Debian/Ubuntu)
+        if: contains(matrix.container, 'ubuntu') || contains(matrix.container, 'debian')
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq wget dpkg grep coreutils
+
+      - name: Install dependencies (RHEL/Rocky)
+        if: contains(matrix.container, 'rocky')
+        run: |
+          dnf install -y wget rpm grep coreutils
+
+      - name: Install dependencies (Alpine)
+        if: contains(matrix.container, 'alpine')
+        run: |
+          apk add --no-cache bash wget grep coreutils
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Write NGINX Plus Credentials (if available)
+        if: ${{ secrets.NGINX_LICENSE_JWT != '' }}
+        run: |
+          mkdir -p /tmp/nginx-secrets
+          echo "${{ secrets.NGINX_REPO_CRT }}" > /tmp/nginx-secrets/nginx-repo.crt
+          echo "${{ secrets.NGINX_REPO_KEY }}" > /tmp/nginx-secrets/nginx-repo.key
+          echo "${{ secrets.NGINX_LICENSE_JWT }}" > /tmp/nginx-secrets/license.jwt
+          chmod 600 /tmp/nginx-secrets/*
+
+      - name: Run Test Suite on ${{ matrix.container }}
+        env:
+          NGINX_REPO_CRT: ${{ secrets.NGINX_LICENSE_JWT != '' && '/tmp/nginx-secrets/nginx-repo.crt' || '' }}
+          NGINX_REPO_KEY: ${{ secrets.NGINX_LICENSE_JWT != '' && '/tmp/nginx-secrets/nginx-repo.key' || '' }}
+          NGINX_LICENSE_JWT: ${{ secrets.NGINX_LICENSE_JWT != '' && '/tmp/nginx-secrets/license.jwt' || '' }}
+        run: |
+          chmod +x ngxunprivinst.sh tests/test_ngxunprivinst.sh
+          ./tests/test_ngxunprivinst.sh
+
+      - name: Cleanup Secrets
+        if: always()
+        run: rm -rf /tmp/nginx-secrets

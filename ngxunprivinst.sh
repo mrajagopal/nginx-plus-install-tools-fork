@@ -79,7 +79,10 @@ fi
 
 if [ "$NGXPATH" = '' ] && ( [ "$ACTION" = 'install' ] || [ "$ACTION" = 'upgrade' ] ) ; then
     echo "-p option is mandatory for install/upgrade"
-    exit
+    exit 1
+fi
+
+if ( [ "$ACTION" = 'install' ] || [ "$ACTION" = 'upgrade' ] ) ; then
     if ! ( [ -x /usr/bin/dpkg ] || [ -x /usr/bin/rpm2cpio ] ); then
         echo "Please make sure that you have dpkg or rpm2cpio packages installed"
         exit 1
