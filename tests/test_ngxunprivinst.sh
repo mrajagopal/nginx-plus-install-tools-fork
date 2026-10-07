@@ -287,9 +287,12 @@ if [ "$(uname -s)" = "Linux" ] && \
   fi
 
   # Run fetch
-  (cd "${LIVE_DIR}" && "${TARGET_SCRIPT}" fetch -c "${NGINX_REPO_CRT}" -k "${NGINX_REPO_KEY}") >/dev/null 2>&1 || true
+  set +e
+  fetch_out=$(cd "${LIVE_DIR}" && "${TARGET_SCRIPT}" fetch -c "${NGINX_REPO_CRT}" -k "${NGINX_REPO_KEY}" 2>&1)
+  fetch_code=$?
+  set -e
 
-  DOWNLOADED_PKG=$(find "${LIVE_DIR}" -type f \( -name "nginx-plus_*.deb" -o -name "nginx-plus-*.rpm" -o -name "nginx-plus-*.apk" \) | head -1)
+  DOWNLOADED_PKG=$(find "${LIVE_DIR}" -type f \( -name "nginx-plus_*.deb" -o -name "nginx-plus-*.rpm" -o -name "nginx-plus-*.apk" \) ! -name "*module*" | head -1)
 
   if [ -n "${DOWNLOADED_PKG}" ] && [ -f "${DOWNLOADED_PKG}" ]; then
     assert_equals "0" "0" "Live package fetch from pkgs.nginx.com succeeded"
@@ -313,6 +316,11 @@ if [ "$(uname -s)" = "Linux" ] && \
       assert_equals "0" "1" "Live NGINX Plus package extracted successfully"
     fi
   else
+    echo "  [DEBUG fetch] fetch_code=${fetch_code}"
+    echo "  [DEBUG fetch] fetch_out:"
+    echo "${fetch_out}" | sed 's/^/    /'
+    echo "  [DEBUG fetch] ls -laR ${LIVE_DIR}:"
+    ls -laR "${LIVE_DIR}" 2>&1 | sed 's/^/    /' || true
     assert_equals "0" "1" "Live package fetch from pkgs.nginx.com succeeded"
   fi
 

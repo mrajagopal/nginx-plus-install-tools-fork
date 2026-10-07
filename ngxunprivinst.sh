@@ -166,10 +166,13 @@ if [ "$ACTION" = 'fetch' ] || [ "$ACTION" = 'list' ]; then
         echo "Check that certificate and key files exist."
         exit 1
     else
-        # check that wget is not a part of busybox package
-        [ `find $(which wget) -type f | wc -l` -eq 0 ] && echo "Please install wget package." && exit 1
+        if ! command -v wget >/dev/null 2>&1; then
+            echo "Please install wget package."
+            exit 1
+        fi
+        WGET_PATH=$(command -v wget)
         # lower security level for certificate check
-        ldd $(which wget) | grep -q libgnutls || \
+        ldd "$WGET_PATH" 2>/dev/null | grep -q libgnutls || \
             echo "" | openssl s_client -servername pkgs.nginx.com -cert $NGXCERT -key $NGXKEY -connect pkgs.nginx.com:443 >/dev/null 2>&1 || \
             WGET='wget -q --ciphers DEFAULT@SECLEVEL=1'
             if ! $WGET -O /dev/null --certificate=$NGXCERT --private-key=$NGXKEY $REPOPREFIX/ ; then
@@ -247,14 +250,14 @@ fetch() {
             $WGET --certificate=$NGXCERT --private-key=$NGXKEY $REPOURL/$MODAPK -O $MODAPK
         done
     else
-        if [ -z $VERSION ]; then
-            NGXRPM=`$WGET -O- --certificate=$NGXCERT --private-key=$NGXKEY $REPOURL | cut -d '"' -f2 | egrep 'nginx-plus-[0-9][0-9]' | sort | uniq | tail -1`
+        if [ -z "$VERSION" ]; then
+            NGXRPM=$($WGET -O- --certificate=$NGXCERT --private-key=$NGXKEY "$REPOURL" | grep -E -o 'nginx-plus-[0-9][0-9][^"]*\.rpm' | fgrep "$ARCH" | sort -V | tail -1)
         else
             echo $VERSION | egrep -q '1[567]\-' && [ "$RELEASE" = "7" ] && RELEASE="7_4"
             NGXRPM=nginx-plus-$VERSION.$SUFFIX$RELEASE.ngx.$ARCH.rpm
         fi
         echo "Downloading $NGXRPM..."
-        $WGET --certificate=$NGXCERT --private-key=$NGXKEY $REPOURL/$NGXRPM -O $NGXRPM ||:
+        $WGET --certificate=$NGXCERT --private-key=$NGXKEY "${REPOURL%/}/$NGXRPM" -O $NGXRPM ||:
         if [ ! -s $NGXRPM ]; then
             echo "Wrong Nginx Plus version!"
             list
@@ -283,7 +286,11 @@ prepare() {
         done
     elif [ "$DISTRO" = "alpine" ]; then
         for PKG in $FILES; do
-            tar -C $TMPDIR -xf $PKG
+            if command -v gzip >/dev/null 2>&1; then
+                gzip -dc "$PKG" | tar -C "$TMPDIR" -i -xf - 2>/dev/null || tar -C "$TMPDIR" -xf "$PKG"
+            else
+                tar -C "$TMPDIR" -i -zxf "$PKG" 2>/dev/null || tar -C "$TMPDIR" -xf "$PKG"
+            fi
             for subarchive in "$TMPDIR"/data.tar* "$TMPDIR"/*.tar.gz "$TMPDIR"/*.tar.xz "$TMPDIR"/*.tar.zst; do
                 if [ -f "$subarchive" ]; then
                     tar -C "$TMPDIR" -xf "$subarchive" 2>/dev/null || true
@@ -296,8 +303,15 @@ prepare() {
         for PKG in $FILES; do
             NGXCPIO=${PKG%%.rpm}.cpio
             cd $TMPDIR
-            rpm2cpio $PKG > $NGXCPIO
-            cpio -id < $NGXCPIO 2>/dev/null
+            if ! command -v cpio >/dev/null 2>&1; then
+                echo "Please install cpio package."
+                exit 1
+            fi
+            if rpm2cpio $PKG > $NGXCPIO 2>/dev/null; then
+                cpio -id < $NGXCPIO 2>/dev/null
+            else
+                tar -C $TMPDIR -xf $PKG 2>/dev/null || true
+            fi
             [ -f $PKG ] && rm -f $PKG
             [ -f $NGXCPIO ] && rm -f $NGXCPIO
         done

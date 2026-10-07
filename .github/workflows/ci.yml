@@ -64,7 +64,7 @@ jobs:
       - name: Install dependencies (RHEL/Rocky)
         if: contains(matrix.container, 'rocky')
         run: |
-          dnf install -y wget rpm grep coreutils gcc procps-ng psmisc openssl-devel zlib
+          dnf install -y --allowerasing wget rpm grep coreutils gcc procps-ng psmisc openssl-devel zlib which cpio
 
       - name: Install dependencies (Alpine)
         if: contains(matrix.container, 'alpine')
