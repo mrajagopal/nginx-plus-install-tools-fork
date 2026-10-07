@@ -283,7 +283,13 @@ prepare() {
         done
     elif [ "$DISTRO" = "alpine" ]; then
         for PKG in $FILES; do
-	        tar -C $TMPDIR -xf $PKG
+            tar -C $TMPDIR -xf $PKG
+            for subarchive in "$TMPDIR"/data.tar* "$TMPDIR"/*.tar.gz "$TMPDIR"/*.tar.xz "$TMPDIR"/*.tar.zst; do
+                if [ -f "$subarchive" ]; then
+                    tar -C "$TMPDIR" -xf "$subarchive" 2>/dev/null || true
+                    rm -f "$subarchive"
+                fi
+            done
         done
     else
         cp $FILES $TMPDIR/
