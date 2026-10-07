@@ -58,17 +58,17 @@ else
     shift
 fi
 
-args=`getopt c:j:k:p:v:y $*`
-
-for opt
-do
-    case "$opt" in
-        -c) NGXCERT=$2; shift; shift;;
-        -j) NGXLICENSE=$2; shift; shift;;
-        -k) NGXKEY=$2;  shift; shift;;
-        -p) NGXPATH=$2; shift; shift;;
-        -v) VERSION=$2; shift; shift;;
-        -y) FORCE="YES"; shift;;
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c) NGXCERT=$2; shift 2 ;;
+        -j) NGXLICENSE=$2; shift 2 ;;
+        -k) NGXKEY=$2; shift 2 ;;
+        -p) NGXPATH=$2; shift 2 ;;
+        -v) VERSION=$2; shift 2 ;;
+        -y) FORCE="YES"; shift ;;
+        --) shift; break ;;
+        -*) echo "Unknown option: $1"; usage; exit 1 ;;
+        *)  break ;;
     esac
 done
 
@@ -83,8 +83,8 @@ if [ "$NGXPATH" = '' ] && ( [ "$ACTION" = 'install' ] || [ "$ACTION" = 'upgrade'
 fi
 
 if ( [ "$ACTION" = 'install' ] || [ "$ACTION" = 'upgrade' ] ) ; then
-    if ! ( [ -x /usr/bin/dpkg ] || [ -x /usr/bin/rpm2cpio ] ); then
-        echo "Please make sure that you have dpkg or rpm2cpio packages installed"
+    if ! ( command -v dpkg >/dev/null 2>&1 || command -v dpkg-deb >/dev/null 2>&1 || command -v rpm2cpio >/dev/null 2>&1 || command -v tar >/dev/null 2>&1 ); then
+        echo "Please make sure that you have dpkg, rpm2cpio, or tar packages installed"
         exit 1
     fi
 fi
@@ -119,9 +119,9 @@ if [ "$NGXLICENSE" = '' ] && ( [ "$ACTION" = 'install' ] || [ "$ACTION" = 'upgra
 fi
 
 ARCH=x86_64
-[ `uname -m` = "aarch64" ] && ARCH=aarch64
+if [ "$(uname -m)" = "aarch64" ]; then ARCH=aarch64; fi
 
-[ -z $REPOPREFIX ] && REPOPREFIX=https://pkgs.nginx.com/plus
+if [ -z "${REPOPREFIX:-}" ]; then REPOPREFIX=https://pkgs.nginx.com/plus; fi
 
 if [ -f /etc/redhat-release ]; then
     RELEASE=`grep -Eo 'release [0-9]{1,2}' /etc/redhat-release | cut -d' ' -f2`
@@ -147,9 +147,9 @@ elif [ -f /etc/os-release ] && fgrep -q -i amazon /etc/os-release; then
         RELEASE="1"
     fi
     DISTRO="amzn"
-elif [ -f /usr/bin/dpkg ]; then
+elif command -v dpkg >/dev/null 2>&1 || [ -f /etc/debian_version ] || ( [ -f /etc/os-release ] && grep -q -E -i "ubuntu|debian" /etc/os-release ); then
     ARCH=amd64
-    [ `uname -m` = "aarch64" ] && ARCH=arm64
+    if [ "$(uname -m)" = "aarch64" ]; then ARCH=arm64; fi
     DISTRO=`grep -E "^ID=" /etc/os-release | cut -d '=' -f2 | tr '[:upper:]' '[:lower:]' | tr -d '"'`
     RELEASE=`grep -E "^VERSION_CODENAME=" /etc/os-release | cut -d '=' -f2 | tr -d '"'`
     REPOURL=$REPOPREFIX/$DISTRO/pool/nginx-plus/n/
@@ -179,7 +179,9 @@ if [ "$ACTION" = 'fetch' ] || [ "$ACTION" = 'list' ]; then
     fi
 fi
 cleanup() {
-    [ -d $TMPDIR ] && rm -rf $TMPDIR
+    if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ]; then
+        rm -rf "$TMPDIR"
+    fi
 }
 
 ask() {
@@ -271,7 +273,7 @@ fetch() {
 
 prepare() {
     mkdir -p $ABSPATH
-    TMPDIR=`mktemp -dq /tmp/nginx-prefix.XXXXXXXX`
+    TMPDIR=`mktemp -d /tmp/nginx-prefix.XXXXXXXX`
     if [ "$JWTREQ" = 'YES' ]; then
         cp $NGXLICENSE $TMPDIR/license.jwt
     fi
@@ -311,8 +313,9 @@ check_modules_deps() {
 }
 
 extract() {
-    ABSPATH=$(readlink -f $NGXPATH)
-    if [ -d $ABSPATH ]; then
+    mkdir -p "$NGXPATH"
+    ABSPATH=$(readlink -f "$NGXPATH" 2>/dev/null || echo "$NGXPATH")
+    if [ -d "$ABSPATH" ]; then
         ask "$ABSPATH already exists. Continue?"
     fi
     prepare
@@ -325,40 +328,47 @@ extract() {
             mv $ABSPATH/etc $ABSPATH/etc.`date +'%Y%d%m%H%M%S'`
         fi
         cp -a $TMPDIR/* $ABSPATH/
-        sed -i "s|\([ ^t]*access_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|\([ ^t]*error_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|\([ ^t]*pid[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|\([ ^t]*include[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|\([ ^t]*root[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|\([ ^t]*user[ ^t]*\)nginx;||" $ABSPATH/etc/nginx/nginx.conf
+        if [ -f $ABSPATH/etc/nginx/nginx.conf ]; then
+            sed -i "s|\([ ^t]*access_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|\([ ^t]*error_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|\([ ^t]*pid[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|\([ ^t]*include[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|\([ ^t]*root[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|\([ ^t]*user[ ^t]*\)nginx;||" $ABSPATH/etc/nginx/nginx.conf || true
 
-        sed -i "s|http {|http {\n    client_body_temp_path $ABSPATH/var/cache/nginx/client_temp;|" \
-            $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|http {|http {\n    proxy_temp_path       $ABSPATH/var/cache/nginx/proxy_temp_path;|" \
-            $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|http {|http {\n    fastcgi_temp_path     $ABSPATH/var/cache/nginx/fastcgi_temp;|" \
-            $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|http {|http {\n    uwsgi_temp_path       $ABSPATH/var/cache/nginx/uwsgi_temp;|" \
-            $ABSPATH/etc/nginx/nginx.conf
-        sed -i "s|http {|http {\n    scgi_temp_path        $ABSPATH/var/cache/nginx/scgi_temp;|" \
-            $ABSPATH/etc/nginx/nginx.conf
+            sed -i "s|http {|http {\n    client_body_temp_path $ABSPATH/var/cache/nginx/client_temp;|" \
+                $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|http {|http {\n    proxy_temp_path       $ABSPATH/var/cache/nginx/proxy_temp_path;|" \
+                $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|http {|http {\n    fastcgi_temp_path     $ABSPATH/var/cache/nginx/fastcgi_temp;|" \
+                $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|http {|http {\n    uwsgi_temp_path       $ABSPATH/var/cache/nginx/uwsgi_temp;|" \
+                $ABSPATH/etc/nginx/nginx.conf || true
+            sed -i "s|http {|http {\n    scgi_temp_path        $ABSPATH/var/cache/nginx/scgi_temp;|" \
+                $ABSPATH/etc/nginx/nginx.conf || true
+        fi
 
-        sed -i "s|\([ ^t]*access_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/conf.d/default.conf
-        sed -i "s|\([ ^t]*root[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/conf.d/default.conf
-        sed -i "s|\([ ^t]*listen[ ^t]*\)80|\1$HTTPPORT|" $ABSPATH/etc/nginx/conf.d/default.conf
+        if [ -f $ABSPATH/etc/nginx/conf.d/default.conf ]; then
+            sed -i "s|\([ ^t]*access_log[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/conf.d/default.conf || true
+            sed -i "s|\([ ^t]*root[ ^t]*\)/|\1$ABSPATH/|" $ABSPATH/etc/nginx/conf.d/default.conf || true
+            sed -i "s|\([ ^t]*listen[ ^t]*\)80|\1$HTTPPORT|" $ABSPATH/etc/nginx/conf.d/default.conf || true
+        fi
 
         mkdir -p $ABSPATH/run
-        ln -sf ../run $ABSPATH/var/run
         mkdir -p $ABSPATH/var/log/nginx
         mkdir -p $ABSPATH/var/cache/nginx
+        mkdir -p $ABSPATH/var/lib/nginx
+        ln -sf ../run $ABSPATH/var/run
         [ -d $ABSPATH/etc/logrotate.d ] && rm -rf $ABSPATH/etc/logrotate.d
         cd $ABSPATH/etc/nginx
         ln -sfn ../../usr/lib*/nginx/modules modules
         # check that nginx binary does not have unmet dependencies
-        if ! ldd $ABSPATH/usr/sbin/nginx > /dev/null 2>&1; then
-            echo "Please install all necessary dependencies to nginx binary" && \
-            echo "Use command \"ldd $ABSPATH/usr/sbin/nginx\" to check unmet dependencies." && \
-            exit 1
+        if file $ABSPATH/usr/sbin/nginx 2>/dev/null | grep -q "ELF"; then
+            if ! ldd $ABSPATH/usr/sbin/nginx > /dev/null 2>&1; then
+                echo "Please install all necessary dependencies to nginx binary" && \
+                echo "Use command \"ldd $ABSPATH/usr/sbin/nginx\" to check unmet dependencies." && \
+                exit 1
+            fi
         fi
         TARGETVER=$($ABSPATH/usr/sbin/nginx -v 2>&1 | cut -d '(' -f 2 | cut -d ')' -f 1 | cut -d'-' -f 3 | tr -d 'r' | cut -d'.' -f1)
         if [ $TARGETVER -ge 33 ]; then
@@ -448,7 +458,7 @@ case $ACTION in
         fetch
         ;;
     install)
-        if [ `ps x | grep -c '[n]ginx: master process'` -eq 0 ]; then
+        if ! ps aux 2>/dev/null | grep -q '[n]ginx: master process'; then
             extract
         else
             echo "Stop running nginx processes or use 'upgrade' script option."
@@ -463,7 +473,8 @@ case $ACTION in
         list
         ;;
     *) 
-        break 
+        usage
+        exit 1
         ;;
 esac
 cleanup

@@ -18,9 +18,8 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:
-          scripthashtag: '#!/bin/sh'
-          additional_files: 'ngxunprivinst.sh'
-          severity: warning
+          additional_files: 'ngxunprivinst.sh tests/test_ngxunprivinst.sh'
+          severity: error
 
   unit-tests:
     name: Unit & Parsing Tests
@@ -60,17 +59,17 @@ jobs:
         if: contains(matrix.container, 'ubuntu') || contains(matrix.container, 'debian')
         run: |
           apt-get update -qq
-          apt-get install -y -qq wget dpkg grep coreutils
+          apt-get install -y -qq wget dpkg grep coreutils gcc procps psmisc libssl-dev zlib1g
 
       - name: Install dependencies (RHEL/Rocky)
         if: contains(matrix.container, 'rocky')
         run: |
-          dnf install -y wget rpm grep coreutils
+          dnf install -y wget rpm grep coreutils gcc procps-ng psmisc openssl-devel zlib
 
       - name: Install dependencies (Alpine)
         if: contains(matrix.container, 'alpine')
         run: |
-          apk add --no-cache bash wget grep coreutils
+          apk add --no-cache bash wget grep coreutils gcc musl-dev procps psmisc openssl zlib
 
       - name: Checkout code
         uses: actions/checkout@v4

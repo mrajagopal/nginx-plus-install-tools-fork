@@ -136,10 +136,10 @@ MOCK_HTML='
 <a href="nginx-plus-37.0.1-1.el9.ngx.x86_64.rpm">nginx-plus-37.0.1-1.el9.ngx.x86_64.rpm</a>
 '
 
-VERSIONS_DEB=$(echo "$MOCK_HTML" | grep -v -- '-dbg' | grep -E "nginx-plus[_-][0-9]+(\.[0-9]+)*-[0-9]+" | fgrep amd64 | fgrep resolute | grep -Eo '[0-9]+(\.[0-9]+)*-[0-9]+' | sort | uniq)
+VERSIONS_DEB=$(echo "$MOCK_HTML" | grep -v -- '-dbg' | grep -E "nginx-plus[_-][0-9]+(\.[0-9]+)*-[0-9]+" | grep -F amd64 | grep -F resolute | grep -Eo '[0-9]+(\.[0-9]+)*-[0-9]+' | sort | uniq)
 assert_contains "37.0.0-1" "$VERSIONS_DEB" "Debian semver package version matched"
 
-VERSIONS_RPM=$(echo "$MOCK_HTML" | grep -v -- '-dbg' | grep -E "nginx-plus[_-][0-9]+(\.[0-9]+)*-[0-9]+" | fgrep x86_64 | fgrep el9 | grep -Eo '[0-9]+(\.[0-9]+)*-[0-9]+' | sort | uniq)
+VERSIONS_RPM=$(echo "$MOCK_HTML" | grep -v -- '-dbg' | grep -E "nginx-plus[_-][0-9]+(\.[0-9]+)*-[0-9]+" | grep -F x86_64 | grep -F el9 | grep -Eo '[0-9]+(\.[0-9]+)*-[0-9]+' | sort | uniq)
 assert_contains "37.0.1-1" "$VERSIONS_RPM" "RPM semver package version matched"
 
 # Test 8: TARGETVER major version integer calculation
@@ -156,11 +156,8 @@ assert_equals "33" "$TARGETVER_LEGACY" "Legacy TARGETVER evaluates to integer 33
 assert_equals "37" "$TARGETVER_SEMVER" "Semver TARGETVER evaluates to integer 37"
 
 # Test shell arithmetic comparison on semver major integer
-set +e
-[ "$TARGETVER_SEMVER" -ge 33 ]
-code=$?
-set -e
-assert_exit_code 0 $code "TARGETVER integer comparison [ 37 -ge 33 ] succeeds without syntax error"
+if [ "$TARGETVER_SEMVER" -ge 33 ]; then code=0; else code=1; fi
+assert_exit_code 0 "$code" "TARGETVER integer comparison [ 37 -ge 33 ] succeeds without syntax error"
 
 # Test 9: End-to-End Installation with synthetic package
 echo ""
@@ -233,7 +230,17 @@ elif command -v tar >/dev/null 2>&1; then
 fi
 
 if [ "$(uname -s)" = "Linux" ] && [ -n "${PKG_FILE}" ] && [ -f "${PKG_FILE}" ]; then
-  "${TARGET_SCRIPT}" install -y -p "${E2E_INSTALL_TARGET}" -j "${E2E_LICENSE}" "${PKG_FILE}" >/dev/null 2>&1 || true
+  set +e
+  install_out=$("${TARGET_SCRIPT}" install -y -p "${E2E_INSTALL_TARGET}" -j "${E2E_LICENSE}" "${PKG_FILE}" 2>&1)
+  install_code=$?
+  set -e
+  if [ "$install_code" -ne 0 ]; then
+    echo "  [DEBUG] install_code=${install_code}"
+    echo "  [DEBUG] install_out:"
+    echo "${install_out}" | sed 's/^/    /'
+    echo "  [DEBUG] ls -laR ${E2E_INSTALL_TARGET}:"
+    ls -laR "${E2E_INSTALL_TARGET}" 2>&1 | sed 's/^/    /' || true
+  fi
 
   if [ -x "${E2E_INSTALL_TARGET}/usr/sbin/nginx" ]; then
     assert_equals "0" "0" "E2E install unpacked nginx binary to prefix"
@@ -262,11 +269,12 @@ rm -rf "${E2E_DIR}"
 echo ""
 echo "Test Category: Live Repository & Package Test"
 
-if [ -n "${NGINX_REPO_CRT:-}" ] && [ -f "${NGINX_REPO_CRT}" ] && \
+if [ "$(uname -s)" = "Linux" ] && \
+   [ -n "${NGINX_REPO_CRT:-}" ] && [ -f "${NGINX_REPO_CRT}" ] && \
    [ -n "${NGINX_REPO_KEY:-}" ] && [ -f "${NGINX_REPO_KEY}" ] && \
    [ -n "${NGINX_LICENSE_JWT:-}" ] && [ -f "${NGINX_LICENSE_JWT}" ]; then
 
-  echo "  Secret certificates detected. Running live pkgs.nginx.com fetch and install..."
+  echo "  Secret certificates detected on Linux. Running live pkgs.nginx.com fetch and install..."
   LIVE_DIR=$(mktemp -d)
   LIVE_PREFIX="${LIVE_DIR}/opt/nginx-live"
 
@@ -287,7 +295,17 @@ if [ -n "${NGINX_REPO_CRT:-}" ] && [ -f "${NGINX_REPO_CRT}" ] && \
     assert_equals "0" "0" "Live package fetch from pkgs.nginx.com succeeded"
 
     # Run install
-    "${TARGET_SCRIPT}" install -y -p "${LIVE_PREFIX}" -j "${NGINX_LICENSE_JWT}" "${DOWNLOADED_PKG}" >/dev/null 2>&1 || true
+    set +e
+    live_install_out=$("${TARGET_SCRIPT}" install -y -p "${LIVE_PREFIX}" -j "${NGINX_LICENSE_JWT}" "${DOWNLOADED_PKG}" 2>&1)
+    live_install_code=$?
+    set -e
+    if [ "$live_install_code" -ne 0 ]; then
+      echo "  [DEBUG] live_install_code=${live_install_code}"
+      echo "  [DEBUG] live_install_out:"
+      echo "${live_install_out}" | sed 's/^/    /'
+      echo "  [DEBUG] ls -laR ${LIVE_PREFIX}:"
+      ls -laR "${LIVE_PREFIX}" 2>&1 | sed 's/^/    /' || true
+    fi
 
     if [ -x "${LIVE_PREFIX}/usr/sbin/nginx" ]; then
       assert_equals "0" "0" "Live NGINX Plus package extracted successfully"
@@ -300,7 +318,7 @@ if [ -n "${NGINX_REPO_CRT:-}" ] && [ -f "${NGINX_REPO_CRT}" ] && \
 
   rm -rf "${LIVE_DIR}"
 else
-  echo "  [SKIP] Live repository test (no secrets provided)"
+  echo "  [SKIP] Live repository test (requires Linux OS/container with secrets provided)"
 fi
 
 echo ""
